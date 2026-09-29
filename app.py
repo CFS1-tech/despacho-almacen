@@ -42,7 +42,13 @@ def _init_sqlite():
 if store.BACKEND == "SQLite local":
     _init_sqlite()
 else:
-    store.init()
+    try:
+        store.init()
+    except Exception as e:  # muestra el motivo real (Streamlit Cloud oculta el mensaje original)
+        st.error(f"No se pudo conectar con el Google Sheet: {type(e).__name__}: {e}")
+        st.info("Revisa en Settings → Secrets: sheet_id y los valores de [gcp_oauth] "
+                "(client_id, client_secret, refresh_token).")
+        st.stop()
 
 ss = st.session_state
 
