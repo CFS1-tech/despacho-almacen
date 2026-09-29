@@ -16,7 +16,6 @@ from gspread.utils import rowcol_to_a1
 from schema import TABLES
 
 BACKEND = "Google Sheets"
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
 
 
 @st.cache_resource(show_spinner=False)
@@ -28,7 +27,6 @@ def _book():
         client_id=cfg["client_id"],
         client_secret=cfg["client_secret"],
         token_uri="https://oauth2.googleapis.com/token",
-        scopes=SCOPES,
     )
     gc = gspread.authorize(creds)
     sheet_id = st.secrets.get("sheet_id") or cfg.get("sheet_id")
