@@ -22,7 +22,7 @@ TABLES = {
         "id", "codigo", "proceso", "cuenta_id", "cuenta", "cliente_id", "cliente", "direccion", "referencia",
         "origen", "destino", "fecha_entrega", "hora_cita", "t_transporte_sol", "contacto", *PEDIDO,
         "observacion", "estado", "ruta_id", "orden_parada", "hora_llegada", "nota_entrega",
-        "solicitante", "creado", "actualizado",
+        "solicitante", "creado", "actualizado", "tipo_fecha", "grupo",
     ],
     "RUTAS": [
         "id", "codigo", "fecha", "hora_salida_plan", "t_transporte", "chofer_id", "chofer", "placa", "viaje",

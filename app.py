@@ -1,4 +1,4 @@
-"""Despacho Almacén — Solicitud → Ruteo → Despacho → Base de entregas.
+"""Distribución CargoFlex Supply — Solicitud → Ruteo → Despacho → Base de entregas.
 
 Streamlit ejecuta este archivo de arriba a abajo en cada interacción. La sección
 activa se guarda en st.session_state["seccion"]; cada sección es una función.
@@ -9,14 +9,13 @@ import pandas as pd
 import streamlit as st
 
 import logic as L
-from auth import hash_clave, verificar_clave
 from parser_plantilla import df_choferes_defecto, df_tipos_defecto, leer_plantilla
-from report import excel_base, excel_hoja_choferes
+from report import excel_base, excel_hoja_choferes, excel_plantilla
 from schema import CATEGORIAS, ESTADOS, PEDIDO, PEDIDO_LABELS, PEDIDO_TEXTO, ROLES, TIPOS_CHOFER
 from utils import (ALMACEN, _hora_actual, ahora_str, es_activo, fmt_fecha, hora_str, hoy, norm, nuevo_id, num, num0,
                    slug, txt)
 
-st.set_page_config(page_title="Despacho Almacén", page_icon="🚚", layout="wide")
+st.set_page_config(page_title="Distribución CargoFlex Supply", page_icon="🚚", layout="wide")
 
 
 # ================================================================ backend
@@ -63,38 +62,111 @@ def mostrar_flash():
         getattr(st, tipo)(msg)
 
 
+# ================================================================ estilos
+CSS = """
+<style>
+:root{--navy:#0e3b2c;--azul:#1f6b45;--azul2:#2e8b57;--lima:#a4cb4c;--rojo:#e0322f;--tinta:#17231d;--gris:#66756c;--linea:#e1e8e3;--fondo:#f3f6f4}
+.stApp{background:var(--fondo)}
+h1,h2,h3,h4{color:var(--navy)!important;letter-spacing:-.01em}
+div[data-testid="stVerticalBlockBorderWrapper"]{background:#fff;border-radius:12px!important;border-color:var(--linea)!important;
+  box-shadow:0 1px 2px rgba(16,42,74,.04),0 4px 14px rgba(16,42,74,.05)}
+.stButton>button[kind="primary"],.stDownloadButton>button[kind="primary"],.stFormSubmitButton>button[kind="primary"]{
+  background:linear-gradient(135deg,var(--azul),var(--azul2));border:0}
+.wms-hero{max-width:440px;margin:48px auto 22px;border-radius:16px;padding:34px 32px 30px;text-align:center;color:#fff;
+  background:linear-gradient(140deg,#071f17 0%,#0e3b2c 50%,#1f6b45 100%);box-shadow:0 18px 40px rgba(7,31,23,.28);position:relative;overflow:hidden}
+.wms-hero:after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:linear-gradient(90deg,var(--lima) 0 70%,var(--rojo) 70% 100%)}
+.wms-logo{background:#fff;border-radius:12px;padding:14px 18px;display:inline-block;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.wms-logo img{width:230px;max-width:100%;display:block}
+.wms-hero h1{color:#fff!important;font-size:22px;margin:22px 0 4px;font-weight:700}
+.wms-hero small{display:block;color:var(--lima);font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+.wms-hero p{color:#cfe3d6;font-size:13px;margin:12px 0 0}
+.app-head{display:flex;align-items:center;gap:16px}
+.app-head img{height:44px}
+.app-head .t{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--azul);border-left:3px solid var(--lima);padding-left:12px;line-height:1.25}
+.app-head .t b{display:block;font-size:20px;letter-spacing:-.01em;text-transform:none;color:var(--navy)}
+section[data-testid="stSidebar"]{background:#0e3b2c}
+section[data-testid="stSidebar"] *{color:#e8f1ec}
+section[data-testid="stSidebar"] .stButton>button{background:transparent;border-color:#3d6b57}
+section[data-testid="stSidebar"] hr{border-color:#2c5a46}
+.pill{display:inline-block;font-size:11px;font-weight:700;border-radius:20px;padding:2px 10px;letter-spacing:.03em;white-space:nowrap}
+.st-pendiente{background:#fff3dc;color:#9a5b00}.st-ruteado{background:#e3ebfb;color:#1f4fb8}.st-en_ruta{background:#ece6fb;color:#5b3fb0}
+.st-entregado{background:#def3e7;color:#1d7a4c}.st-no_entregado{background:#fbe1de;color:#b3261e}
+.proc{display:inline-block;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;border-radius:4px;padding:1px 6px}
+.proc-OUT{background:#e3ebfb;color:#1f4fb8}.proc-IN{background:#def3e7;color:#1d7a4c}
+.sol-cod{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;font-size:12px;color:var(--navy);white-space:nowrap}
+.sol-grp{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:10.5px;color:var(--gris);white-space:nowrap}
+.sol-sub{color:var(--gris);font-size:12px;line-height:1.35}
+.sol-tit{font-weight:600;color:var(--tinta);font-size:14px;line-height:1.3}
+.sol-fecha{font-weight:600;color:var(--tinta);font-size:13px}
+.kpi-mini{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 10px}
+.kpi-mini span{background:#fff;border:1px solid var(--linea);border-radius:20px;padding:3px 12px;font-size:12px;color:#4a5a66}
+.kpi-mini b{color:var(--navy)}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
+
+# ================================================================ marca
+import base64
+import os
+
+MARCA = "Distribución CargoFlex Supply"
+
+
+@st.cache_resource
+def _logo_b64():
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+    if not os.path.exists(ruta):
+        return ""
+    with open(ruta, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+
+
+def logo_html(clase=""):
+    b = _logo_b64()
+    return f'<img class="{clase}" src="data:image/png;base64,{b}" alt="CargoFlex Supply">' if b else "<b>CargoFlex Supply</b>"
+
+
 # ================================================================ login
+def _dni_ok(v: str) -> bool:
+    return v.isdigit() and 8 <= len(v) <= 12
+
+
 def pantalla_login():
-    st.title("🚚 Despacho Almacén")
+    st.markdown("<style>section[data-testid='stSidebar']{display:none}"
+                "div[data-testid='stTextInput'] label p{font-size:11px!important;font-weight:700!important;"
+                "letter-spacing:.08em;text-transform:uppercase;color:#4a5a50!important}</style>",
+                unsafe_allow_html=True)
     usuarios = store.read("USUARIOS")
-    if usuarios.empty:
-        st.info("Primera vez: crea el usuario **administrador**.")
-        with st.form("f_admin"):
-            u = st.text_input("Usuario").strip().lower()
-            n = st.text_input("Nombre")
-            c1 = st.text_input("Clave", type="password")
-            c2 = st.text_input("Repite la clave", type="password")
-            if st.form_submit_button("Crear administrador", type="primary"):
-                if not u or len(c1) < 6:
-                    st.error("Escribe un usuario y una clave de al menos 6 caracteres.")
-                elif c1 != c2:
-                    st.error("Las claves no coinciden.")
-                else:
-                    store.append("USUARIOS", [{"id": u, "nombre": n or u, "clave_hash": hash_clave(c1),
-                                               "roles": "admin", "activo": "TRUE", "creado": ahora_str()}])
-                    ss["usuario"] = u
-                    st.rerun()
-        return
-    with st.form("f_login"):
-        u = st.text_input("Usuario").strip().lower()
-        c = st.text_input("Clave", type="password")
-        if st.form_submit_button("Ingresar", type="primary"):
-            fila = usuarios[usuarios["id"] == u]
-            if fila.empty or not es_activo(fila.iloc[0]["activo"]) or not verificar_clave(c, fila.iloc[0]["clave_hash"]):
-                st.error("Usuario o clave incorrectos.")
-            else:
-                ss["usuario"] = u
-                st.rerun()
+    primera = usuarios.empty
+    st.markdown(f"""<div class="wms-hero"><div class="wms-logo">{logo_html()}</div>
+        <h1>Sistema de Distribución</h1><small>CargoFlex Supply</small>
+        <p>{"Primera vez: registra al administrador" if primera else "Ingresa tu DNI para continuar"}</p></div>""",
+                unsafe_allow_html=True)
+    _, centro, _ = st.columns([1, 1.4, 1])
+    with centro, st.container(border=True):
+        if primera:
+            with st.form("f_admin", border=False):
+                u = st.text_input("DNI", placeholder="Número de DNI", max_chars=12).strip()
+                n = st.text_input("Nombre completo")
+                if st.form_submit_button("Crear administrador", type="primary", width="stretch"):
+                    if not _dni_ok(u):
+                        st.error("Escribe un DNI válido (solo números, 8 dígitos).")
+                    else:
+                        store.append("USUARIOS", [{"id": u, "nombre": n or u, "clave_hash": "", "roles": "admin",
+                                                   "activo": "TRUE", "creado": ahora_str()}])
+                        ss["usuario"] = u
+                        st.rerun()
+        else:
+            with st.form("f_login", border=False):
+                u = st.text_input("DNI", placeholder="Ingresa tu número de DNI", max_chars=12).strip()
+                if st.form_submit_button("Ingresar al sistema", type="primary", width="stretch"):
+                    fila = usuarios[usuarios["id"] == u]
+                    if fila.empty or not es_activo(fila.iloc[0]["activo"]):
+                        st.error("Ese DNI no está registrado o está inactivo. Pide al administrador que te dé acceso.")
+                    else:
+                        ss["usuario"] = u
+                        st.rerun()
 
 
 if "usuario" not in ss:
@@ -138,7 +210,9 @@ if ss.get("seccion") not in claves:
     ss["seccion"] = claves[0]
 
 with st.sidebar:
-    st.markdown(f"### 🚚 Despacho Almacén\n**{NOMBRE}**  \n"
+    st.markdown(f"<div style='background:#fff;border-radius:10px;padding:10px 12px;margin-bottom:14px'>{logo_html()}</div>",
+                unsafe_allow_html=True)
+    st.markdown(f"**{NOMBRE}**  \n"
                 + " · ".join(ROLES.get(r, r) for r in sorted(MIS_ROLES)))
     st.radio("Ir a", claves, format_func=lambda k: dict((s[0], s[1]) for s in SECCIONES)[k], key="seccion",
              label_visibility="collapsed")
@@ -157,7 +231,8 @@ def ir_a(sec):
 
 
 c1, c2, c3 = st.columns([5, 2, 2])
-c1.markdown("## 🚚 Despacho Almacén")
+c1.markdown(f"<div class='app-head'>{logo_html()}<div class='t'>Sistema de<b>Distribución</b></div></div>",
+            unsafe_allow_html=True)
 if "regularizacion" in claves:
     c2.button("🧾 Regularización de despacho", width="stretch", on_click=ir_a, args=("regularizacion",),
               type="primary" if ss["seccion"] == "regularizacion" else "secondary")
@@ -367,43 +442,239 @@ def tabla_registros(df: pd.DataFrame, columnas: dict, alto=None):
 
 
 # ================================================================ secciones
+# ================================================================ solicitud de transporte (varios puntos)
+PUNTO_COLS = {"cliente": "Cliente / punto de entrega", "direccion": "Dirección", "destino": "Destino (distrito)",
+              "referencia": "Referencia", "contacto": "Contacto", "cant_caja": "Cajas", "pedido_gr": "Pedido - GR",
+              "n_orden": "N.° orden", "palets": "Palets", "unidades": "Unidades", "cant_inner": "Inner",
+              "accesorio": "Accesorio", "maquina": "Máquina", "x_und_acc": "X und. acc."}
+NUM_PUNTO = ["cant_caja", "palets", "unidades", "cant_inner", "accesorio", "maquina", "x_und_acc"]
+TIPO_FECHA = {"exacta": "En fecha exacta", "hasta": "Hasta una fecha límite"}
+EDITABLES = ("pendiente", "ruteado")
+
+
+def _txt_fecha(s) -> str:
+    return ("Hasta " if s.get("tipo_fecha") == "hasta" else "") + fmt_fecha(s["fecha_entrega"])
+
+
+def _sol_reset():
+    for k in [k for k in ss.keys() if str(k).startswith("sol_")]:
+        if k not in ("sol_cuenta", "sol_fecha", "sol_proc", "sol_tipo_fecha", "sol_n"):
+            del ss[k]
+    ss["sol_n"] = ss.get("sol_n", 0) + 1
+
+
+def form_solicitud():
+    if ss.pop("_sol_reset", False):
+        _sol_reset()
+    ss.setdefault("sol_proc", "OUT")
+    ss.setdefault("sol_fecha", hoy())
+    ss.setdefault("sol_tipo_fecha", "exacta")
+    st.radio("Proceso", ["OUT", "IN"], format_func={"OUT": "OUT · Despacho", "IN": "IN · Recepción"}.get,
+             horizontal=True, key="sol_proc")
+    cu = cuentas_act()
+    cuenta_id = st.selectbox("Cuenta", cu["id"].tolist(), format_func=dict(zip(cu["id"], cu["nombre"])).get,
+                             index=None, placeholder="Selecciona la cuenta…", key="sol_cuenta")
+    cl = clientes_de(cuenta_id) if cuenta_id else pd.DataFrame(columns=["id", "cliente", "destino"])
+    etiqueta = {r["id"]: r["cliente"] + (f"  ·  {r['destino']}" if r["destino"] else "") for _, r in cl.iterrows()}
+    sel = st.multiselect("Clientes / puntos de entrega (opcional)", cl["id"].tolist(), format_func=etiqueta.get,
+                         key=f"sol_sel_{cuenta_id}", disabled=not cuenta_id,
+                         placeholder="Escribe para buscar · puedes elegir varios" if cuenta_id else "Primero elige la cuenta",
+                         help="Cada cliente es un punto de entrega distinto: se registra una solicitud por punto.")
+    filas = []
+    cli_idx = cl.set_index("id") if not cl.empty else None
+    for cid in sel:
+        r = cli_idx.loc[cid]
+        filas.append({"id": cid, "cliente": r["cliente"], "direccion": r["direccion"], "destino": r["destino"],
+                      "referencia": r["referencia"], "contacto": r["contacto"]})
+    if not filas:
+        filas = [{"id": ""}]
+    df = pd.DataFrame(filas, columns=["id", *PUNTO_COLS]).fillna("")
+    for k in NUM_PUNTO:
+        df[k] = pd.to_numeric(df[k], errors="coerce")
+    cfg = {"id": None}
+    for k, lab in PUNTO_COLS.items():
+        cfg[k] = (st.column_config.NumberColumn(lab, min_value=0, width="small") if k in NUM_PUNTO
+                  else st.column_config.TextColumn(lab, width="medium" if k in ("cliente", "direccion") else "small"))
+    st.markdown("**Puntos de entrega**")
+    ed = st.data_editor(df, num_rows="dynamic", hide_index=True, width="stretch", column_config=cfg,
+                        key=f"sol_ed_{ss.get('sol_n', 0)}_{cuenta_id}_{'|'.join(sel)}")
+    st.caption("Revisa o completa la dirección de cada punto: queda guardada para la próxima vez. "
+               "Para un punto nuevo, escribe en la última fila de la tabla.")
+    a, b = st.columns(2)
+    a.radio("Fecha de entrega", list(TIPO_FECHA), format_func=TIPO_FECHA.get, key="sol_tipo_fecha")
+    b.date_input("Fecha límite" if ss["sol_tipo_fecha"] == "hasta" else "Fecha", key="sol_fecha", format="DD/MM/YYYY")
+    a, b = st.columns(2)
+    a.time_input("Hora de cita (opcional)", value=None, key="sol_hora", step=timedelta(minutes=15))
+    ti = tipos_act()
+    ti = ti[ti["categoria"] != "CLIENTE"]
+    b.selectbox("T. transporte (opcional)", ti["nombre"].tolist(), index=None, placeholder="Sin preferencia",
+                key="sol_tipo")
+    st.text_area("Observaciones", key="sol_obs", height=80, placeholder="Qué se envía, indicaciones de acceso…")
+    if st.button("Registrar solicitud", type="primary", width="stretch"):
+        _guardar_solicitud(cuenta_id, ed, cli_idx)
+
+
+def _guardar_solicitud(cuenta_id, ed, cli_idx):
+    if not cuenta_id:
+        st.error("Elige la cuenta.")
+        return
+    ed = ed.copy()
+    for k in PUNTO_COLS:
+        if k not in NUM_PUNTO:
+            ed[k] = ed[k].map(txt)
+    puntos = ed[(ed["cliente"] != "") | (ed["direccion"] != "")]
+    if puntos.empty:
+        st.error("Agrega al menos un punto de entrega con su dirección.")
+        return
+    sin_dir = puntos[puntos["direccion"] == ""]
+    if not sin_dir.empty:
+        st.error("Falta la dirección de: " + ", ".join(sin_dir["cliente"].replace("", "(sin nombre)")))
+        return
+    cuenta = store.read("CUENTAS").set_index("id").loc[cuenta_id, "nombre"]
+    proceso = ss["sol_proc"]
+    grupo = L.nuevo_grupo() if len(puntos) > 1 else ""
+    codigos = []
+    for _, p in puntos.iterrows():
+        lugar = p["destino"].upper()
+        cid = p["id"] if txt(p["id"]) and cli_idx is not None and txt(p["id"]) in cli_idx.index \
+            and norm(cli_idx.loc[p["id"], "cliente"]) == norm(p["cliente"]) else ""
+        datos = {"proceso": proceso, "cuenta_id": cuenta_id, "cuenta": cuenta, "cliente": p["cliente"], "cliente_id": cid,
+                 "direccion": p["direccion"], "referencia": p["referencia"], "contacto": p["contacto"],
+                 "origen": ALMACEN if proceso == "OUT" else (lugar or "CLIENTE"),
+                 "destino": lugar if proceso == "OUT" else ALMACEN,
+                 "fecha_entrega": ss["sol_fecha"].isoformat(), "tipo_fecha": ss["sol_tipo_fecha"],
+                 "hora_cita": hora_str(ss.get("sol_hora")), "t_transporte_sol": ss.get("sol_tipo") or "",
+                 "observacion": txt(ss.get("sol_obs")), "grupo": grupo,
+                 "pedido_gr": p["pedido_gr"], "n_orden": p["n_orden"]}
+        for k in NUM_PUNTO:
+            datos[k] = "" if num(p[k]) is None else str(num(p[k]))
+        codigos.append(L.crear_movimiento(store, "SOLICITUDES", datos, USUARIO)["codigo"])
+    ss["_sol_reset"] = True
+    flash(f"Registrado: **{', '.join(codigos)}**" + (f" (pedido {grupo})" if grupo else ""))
+    st.rerun()
+
+
+@st.dialog("Editar solicitud", width="large")
+def dlg_editar_solicitud(sol_id):
+    sols = store.read("SOLICITUDES").set_index("id")
+    if sol_id not in sols.index:
+        st.error("No se encontró la solicitud.")
+        return
+    s = sols.loc[sol_id]
+    st.markdown(f"<span class='sol-cod'>{s['codigo']}</span> &nbsp; <span class='proc proc-{s['proceso']}'>{s['proceso']}</span>"
+                f" &nbsp; <span class='pill st-{s['estado']}'>{ESTADOS.get(s['estado'], s['estado'])}</span>"
+                f"<div class='sol-sub'>{s['cuenta']}</div>", unsafe_allow_html=True)
+    if s["estado"] == "ruteado":
+        st.info("Esta solicitud ya está en una ruta. Los cambios se verán en la hoja de ruta.")
+    k = f"ed_{sol_id}_"
+    a, b = st.columns(2)
+    cliente = a.text_input("Cliente / punto de entrega", s["cliente"], key=k + "cli")
+    lugar_actual = s["destino"] if s["proceso"] == "OUT" else s["origen"]
+    destino = b.text_input("Destino (distrito)", "" if lugar_actual in (ALMACEN, "CLIENTE") else lugar_actual, key=k + "des")
+    direccion = st.text_input("Dirección", s["direccion"], key=k + "dir")
+    a, b = st.columns(2)
+    referencia = a.text_input("Referencia", s["referencia"], key=k + "ref")
+    contacto = b.text_input("Contacto", s["contacto"].replace("\n", " / "), key=k + "con")
+    a, b, c = st.columns(3)
+    tf = a.radio("Fecha de entrega", list(TIPO_FECHA), format_func=TIPO_FECHA.get, key=k + "tf",
+                 index=1 if s.get("tipo_fecha") == "hasta" else 0)
+    fecha = b.date_input("Fecha", date.fromisoformat(s["fecha_entrega"]) if s["fecha_entrega"] else hoy(),
+                         key=k + "fe", format="DD/MM/YYYY")
+    hora_txt = c.text_input("Hora de cita (HH:MM, opcional)", s["hora_cita"], key=k + "ho")
+    ti = tipos_act()
+    ti = ti[ti["categoria"] != "CLIENTE"]["nombre"].tolist()
+    tipo = st.selectbox("T. transporte (opcional)", ti, index=ti.index(s["t_transporte_sol"]) if s["t_transporte_sol"] in ti else None,
+                        placeholder="Sin preferencia", key=k + "ti")
+    cols = st.columns(5)
+    valores = {}
+    for n, campo in enumerate(["cant_caja", "pedido_gr", "n_orden", "palets", "unidades", "cant_inner", "accesorio",
+                               "maquina", "x_und_acc"]):
+        valores[campo] = cols[n % 5].text_input(PEDIDO_LABELS[campo], s[campo], key=k + campo)
+    obs = st.text_area("Observaciones", s["observacion"], key=k + "obs", height=70)
+    a, b = st.columns([1, 1])
+    if a.button("💾 Guardar cambios", type="primary", width="stretch", key=k + "save"):
+        h = txt(hora_txt)
+        if h and not (len(h) == 5 and h[2] == ":" and h.replace(":", "").isdigit()):
+            st.error("La hora debe tener el formato HH:MM, por ejemplo 10:30.")
+            return
+        if not txt(direccion):
+            st.error("La dirección no puede quedar vacía.")
+            return
+        lugar = txt(destino).upper()
+        cambios = {"cliente": txt(cliente), "direccion": txt(direccion), "referencia": txt(referencia),
+                   "contacto": txt(contacto), "tipo_fecha": tf, "fecha_entrega": fecha.isoformat(), "hora_cita": h,
+                   "t_transporte_sol": tipo or "", "observacion": txt(obs), "actualizado": ahora_str(),
+                   "origen": ALMACEN if s["proceso"] == "OUT" else (lugar or "CLIENTE"),
+                   "destino": lugar if s["proceso"] == "OUT" else ALMACEN}
+        for campo, v in valores.items():
+            cambios[campo] = txt(v) if campo in PEDIDO_TEXTO else ("" if num(v) is None else str(num(v)))
+        store.update("SOLICITUDES", sol_id, cambios)
+        L.aprender_cliente(store, {**s.to_dict(), **cambios}, contar=False)
+        flash(f"Solicitud {s['codigo']} actualizada.")
+        st.rerun()
+    if s["estado"] == "pendiente":
+        conf = b.checkbox("Confirmo que quiero anularla", key=k + "conf")
+        if b.button("🗑️ Anular solicitud", width="stretch", disabled=not conf, key=k + "anu"):
+            L.anular_solicitud(store, sol_id, USUARIO)
+            flash(f"Solicitud {s['codigo']} anulada.")
+            st.rerun()
+
+
+def lista_mis_solicitudes():
+    sols = store.read("SOLICITUDES")
+    mias = sols[(sols["solicitante"] == USUARIO) & (sols["estado"] != "anulado")]
+    cuenta = mias["estado"].value_counts()
+    st.markdown("#### Mis solicitudes")
+    st.markdown("<div class='kpi-mini'>" + "".join(
+        f"<span>{ESTADOS[e]}&nbsp; <b>{cuenta.get(e, 0)}</b></span>" for e in ("pendiente", "ruteado", "en_ruta", "entregado", "no_entregado"))
+        + "</div>", unsafe_allow_html=True)
+    f1, f2 = st.columns([1, 2])
+    est = f1.selectbox("Estado", ["", "pendiente", "ruteado", "en_ruta", "entregado", "no_entregado"],
+                       format_func=lambda e: ESTADOS.get(e, "Todos"), key="ms_est")
+    q = f2.text_input("Buscar", placeholder="Cuenta, cliente, código, GR, destino", key="ms_q")
+    if est:
+        mias = mias[mias["estado"] == est]
+    if q:
+        mias = mias[(mias["cuenta"] + " " + mias["cliente"] + " " + mias["codigo"] + " " + mias["pedido_gr"] + " "
+                     + mias["destino"] + " " + mias["grupo"]).map(norm).str.contains(norm(q), regex=False)]
+    mias = mias.sort_values("creado", ascending=False)
+    if mias.empty:
+        st.info("No hay solicitudes con estos filtros." if est or q else "Aún no registraste solicitudes.")
+        return
+    rutas = store.read("RUTAS").set_index("id")
+    limite = 40
+    for _, s in mias.head(limite).iterrows():
+        r = rutas.loc[s["ruta_id"]] if s["ruta_id"] in rutas.index else None
+        lugar = s["destino"] if s["proceso"] == "OUT" else s["origen"]
+        with st.container(border=True):
+            c0, c1, c2, c3 = st.columns([1.45, 3, 1.75, 0.6], vertical_alignment="center")
+            c0.markdown(f"<div class='sol-cod'>{s['codigo']}</div><span class='proc proc-{s['proceso']}'>{s['proceso']}</span>"
+                        + (f" <div class='sol-grp'>⛓ {s['grupo']}</div>" if s["grupo"] else ""), unsafe_allow_html=True)
+            c1.markdown(f"<div class='sol-tit'>{s['cuenta']}</div>"
+                        f"<div class='sol-sub'><b>{s['cliente'] or '—'}</b>{' · ' + lugar if lugar else ''}</div>"
+                        f"<div class='sol-sub'>{s['direccion']}</div>", unsafe_allow_html=True)
+            c2.markdown(f"<span class='pill st-{s['estado']}'>{ESTADOS.get(s['estado'], s['estado'])}</span>"
+                        f"<div class='sol-fecha' style='margin-top:4px'>{_txt_fecha(s)}</div>"
+                        f"<div class='sol-sub'>{'Cita ' + s['hora_cita'] if s['hora_cita'] else 'Sin hora de cita'}"
+                        f"{' · ' + s['cant_caja'] + ' cj' if s['cant_caja'] else ''}</div>"
+                        + (f"<div class='sol-sub'>🚚 {r['codigo']} · {r['chofer']}</div>" if r is not None else "")
+                        + (f"<div class='sol-sub'>{s['nota_entrega']}</div>" if s["nota_entrega"] else ""),
+                        unsafe_allow_html=True)
+            if c3.button("✏️", key=f"edit_{s['id']}", help="Editar" if s["estado"] in EDITABLES
+                         else "Ya salió a ruta: no se puede editar", disabled=s["estado"] not in EDITABLES):
+                dlg_editar_solicitud(s["id"])
+    if len(mias) > limite:
+        st.caption(f"Mostrando las {limite} más recientes de {len(mias)}. Usa el buscador para encontrar otras.")
+
+
 def sec_solicitudes():
     st.subheader("Solicitud de unidad de transporte")
     st.caption("Queda **pendiente** hasta que el área de ruteo la asigne a una ruta.")
-    izq, der = st.columns([2, 3], gap="large")
-    with izq:
-        with st.container(border=True):
-            form_movimiento("s")
+    izq, der = st.columns([5, 6], gap="large")
+    with izq, st.container(border=True):
+        form_solicitud()
     with der:
-        st.markdown("**Mis solicitudes**")
-        sols = store.read("SOLICITUDES")
-        mias = sols[sols["solicitante"] == USUARIO].sort_values("creado", ascending=False)
-        f1, f2 = st.columns(2)
-        est = f1.selectbox("Estado", [""] + list(ESTADOS)[:6], format_func=lambda e: ESTADOS.get(e, "Todos"))
-        q = f2.text_input("Buscar", placeholder="Cuenta, cliente, código, GR")
-        if est:
-            mias = mias[mias["estado"] == est]
-        if q:
-            mias = mias[(mias["cuenta"] + " " + mias["cliente"] + " " + mias["codigo"] + " " + mias["pedido_gr"])
-                        .map(norm).str.contains(norm(q), regex=False)]
-        rutas = store.read("RUTAS").set_index("id")
-        v = mias.copy()
-        v["Estado"] = v["estado"].map(pill_estado)
-        v["Ruta"] = v["ruta_id"].map(lambda i: f"{rutas.loc[i, 'codigo']} · {rutas.loc[i, 'chofer']}"
-                                     if i in rutas.index else "")
-        v["Fecha"] = v["fecha_entrega"].map(fmt_fecha)
-        tabla_registros(v, {"codigo": "Código", "proceso": "Proc.", "cuenta": "Cuenta", "cliente": "Cliente",
-                            "destino": "Destino", "Fecha": "Entrega", "hora_cita": "Cita", "Estado": "Estado",
-                            "Ruta": "Ruta", "nota_entrega": "Nota"}, alto=420)
-        pend = mias[mias["estado"] == "pendiente"]
-        if not pend.empty:
-            with st.expander("Anular una solicitud pendiente"):
-                sid = st.selectbox("Solicitud", pend["id"].tolist(),
-                                   format_func=dict(zip(pend["id"], pend["codigo"] + " · " + pend["cliente"])).get)
-                if st.button("Anular", type="secondary"):
-                    L.anular_solicitud(store, sid, USUARIO)
-                    flash("Solicitud anulada.")
-                    st.rerun()
+        lista_mis_solicitudes()
 
 
 def _lista_propia(tabla, titulo, columnas):
@@ -474,7 +745,9 @@ def sec_ruteo():
     agrupar = f2.selectbox("Ordenar por", ["Destino", "Cuenta", "Transporte solicitado", "Hora de cita"])
     atras = f3.checkbox("Incluir pendientes atrasados", key="rt_atras")
     fs = fecha.isoformat()
-    pend = sols[(sols["estado"] == "pendiente") & ((sols["fecha_entrega"] == fs) | (atras & (sols["fecha_entrega"] < fs)))]
+    hasta = sols["tipo_fecha"] == "hasta"
+    pend = sols[(sols["estado"] == "pendiente") & ((sols["fecha_entrega"] == fs) | (hasta & (sols["fecha_entrega"] > fs))
+                                                   | (atras & (sols["fecha_entrega"] < fs)))]
     atrasados = sols[(sols["estado"] == "pendiente") & (sols["fecha_entrega"] < fs)]
     if len(atrasados) and not atras:
         st.warning(f"Hay {len(atrasados)} solicitud(es) pendiente(s) de fechas anteriores. "
@@ -493,7 +766,7 @@ def sec_ruteo():
             vista = pd.DataFrame({
                 "Sel": False, "Orden": None, "Código": v["codigo"], "Proc.": v["proceso"], "Cuenta": v["cuenta"],
                 "Cliente": v["cliente"], "Destino": v["Lugar"], "Cita": v["hora_cita"],
-                "Fecha": v["fecha_entrega"].map(fmt_fecha), "Cajas": v["cant_caja"],
+                "Fecha": [_txt_fecha(x) for _, x in v.iterrows()], "Cajas": v["cant_caja"],
                 "Pide": v["t_transporte_sol"], "GR": v["pedido_gr"], "Dirección": v["direccion"], "id": v["id"],
             })
             ed = st.data_editor(
@@ -716,13 +989,13 @@ def sec_reportes():
     dias = (hasta - desde).days + 1
     if dias > 45:
         g1.markdown("**Registros por mes**")
-        g1.bar_chart(x.groupby(x["fecha_entrega"].str[:7])["_n"].sum(), color="#1f4fb8")
+        g1.bar_chart(x.groupby(x["fecha_entrega"].str[:7])["_n"].sum(), color="#1f6b45")
     else:
         g1.markdown("**Registros por día**")
-        g1.bar_chart(x.groupby("fecha_entrega")["_n"].sum(), color="#1f4fb8")
+        g1.bar_chart(x.groupby("fecha_entrega")["_n"].sum(), color="#1f6b45")
     g2.markdown("**Top cuentas**")
     g2.bar_chart(x.groupby("cuenta")["_n"].sum().sort_values(ascending=False).head(10), horizontal=True,
-                 color="#1f4fb8")
+                 color="#1f6b45")
 
     t1, t2, t3, t4, t5 = st.tabs(["Base de entregas", "Diario", "Por cuenta", "Por transporte", "Por chofer"])
     from schema import BASE_COLS
@@ -825,6 +1098,16 @@ def sec_maestros():
 def sec_importar():
     st.markdown("Sube tu Excel de trabajo (con las hojas **MATRICES** y **RUTEO**) para cargar cuentas, "
                 "clientes e histórico.")
+    st.caption("Puedes subir tu Excel de siempre (PROPUESTA_PLANTILLA) tal cual, o descargar esta plantilla "
+               "con el formato exacto y las instrucciones.")
+    cu = store.read("CUENTAS")
+    st.download_button(
+        "⬇️ Descargar plantilla de importación (Excel)",
+        excel_plantilla(sorted(cu["nombre"].tolist()) if not cu.empty else [],
+                        sorted(store.read("TIPOS_TRANSPORTE")["nombre"].tolist()),
+                        sorted(store.read("CHOFERES")["nombre"].tolist())),
+        file_name="PLANTILLA_IMPORTACION_DESPACHO.xlsx")
+    st.divider()
     if store.read("TIPOS_TRANSPORTE").empty or store.read("CHOFERES").empty:
         if st.button("Cargar tipos de transporte y choferes por defecto"):
             if store.read("TIPOS_TRANSPORTE").empty:
@@ -870,7 +1153,7 @@ def sec_usuarios():
     for r in roles_sin_admin:
         vista[ROLES[r]] = u["roles"].map(lambda s, r=r: r in s.split(","))
     ed = st.data_editor(vista, hide_index=True, width="stretch", key="u_ed",
-                        column_config={"id": st.column_config.TextColumn("Usuario", disabled=True)})
+                        column_config={"id": st.column_config.TextColumn("DNI / usuario", disabled=True)})
     if st.button("Guardar roles", type="primary"):
         base = u.set_index("id")
         filas = []
@@ -884,33 +1167,21 @@ def sec_usuarios():
         store.replace_all("USUARIOS", pd.DataFrame(filas))
         flash("Roles guardados.")
         st.rerun()
-    a, b = st.columns(2, gap="large")
-    with a, st.form("f_nuevo_u", clear_on_submit=True):
+    with st.form("f_nuevo_u", clear_on_submit=True):
         st.markdown("**Nuevo usuario**")
-        nu = st.text_input("Usuario (sin espacios)").strip().lower()
-        nn = st.text_input("Nombre")
-        nc = st.text_input("Clave inicial", type="password")
-        nr = st.multiselect("Roles", list(ROLES), format_func=ROLES.get)
+        a, b, c = st.columns([1, 2, 2])
+        nu = a.text_input("DNI", max_chars=12).strip()
+        nn = b.text_input("Nombre completo")
+        nr = c.multiselect("Roles", list(ROLES), format_func=ROLES.get)
         if st.form_submit_button("Crear usuario", type="primary"):
-            if not nu or " " in nu or len(nc) < 6:
-                st.error("Usuario sin espacios y clave de al menos 6 caracteres.")
+            if not _dni_ok(nu):
+                st.error("Escribe un DNI válido (solo números, 8 dígitos).")
             elif nu in set(u["id"]):
-                st.error("Ese usuario ya existe.")
+                st.error("Ya existe un usuario con ese DNI.")
             else:
-                store.append("USUARIOS", [{"id": nu, "nombre": nn or nu, "clave_hash": hash_clave(nc),
+                store.append("USUARIOS", [{"id": nu, "nombre": nn or nu, "clave_hash": "",
                                            "roles": ",".join(nr), "activo": "TRUE", "creado": ahora_str()}])
-                flash(f"Usuario {nu} creado.")
-                st.rerun()
-    with b, st.form("f_clave", clear_on_submit=True):
-        st.markdown("**Restablecer clave**")
-        cu_ = st.selectbox("Usuario", u["id"].tolist())
-        c1 = st.text_input("Nueva clave", type="password")
-        if st.form_submit_button("Cambiar clave"):
-            if len(c1) < 6:
-                st.error("La clave debe tener al menos 6 caracteres.")
-            else:
-                store.update("USUARIOS", cu_, {"clave_hash": hash_clave(c1)})
-                flash("Clave actualizada.")
+                flash(f"Usuario {nu} creado. Ya puede ingresar con su DNI.")
                 st.rerun()
 
 

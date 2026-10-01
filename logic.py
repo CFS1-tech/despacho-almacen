@@ -35,8 +35,13 @@ def nombres_usuarios(store) -> dict:
     return {r["id"]: (r["nombre"] or r["id"]) for _, r in u.iterrows()}
 
 
-def aprender_cliente(store, mov: dict):
-    """Si el cliente no existe en la cuenta lo crea; si existe, completa datos vacíos."""
+def nuevo_grupo() -> str:
+    return nuevo_codigo("P")
+
+
+def aprender_cliente(store, mov: dict, contar: bool = True):
+    """Si el cliente no existe en la cuenta lo crea. Si existe, guarda la dirección y el destino
+    usados (ubicaciones fijas: la última registrada queda como la habitual) y completa datos vacíos."""
     cuenta_id, cliente = mov.get("cuenta_id"), txt(mov.get("cliente"))
     if not cuenta_id or not cliente:
         return
@@ -52,12 +57,15 @@ def aprender_cliente(store, mov: dict):
         }])
         return
     r = ex.iloc[0]
-    cambios = {"usos": str(int(num0(r["usos"])) + 1)}
-    for k, v in (("direccion", mov.get("direccion")), ("contacto", mov.get("contacto")),
-                 ("referencia", mov.get("referencia")), ("destino", lugar)):
+    cambios = {"usos": str(int(num0(r["usos"])) + 1)} if contar else {}
+    for k, v in (("direccion", mov.get("direccion")), ("destino", lugar)):
+        if txt(v) and txt(v) != txt(r[k]):
+            cambios[k] = txt(v)
+    for k, v in (("contacto", mov.get("contacto")), ("referencia", mov.get("referencia"))):
         if not txt(r[k]) and txt(v):
             cambios[k] = txt(v)
-    store.update("CLIENTES", r["id"], cambios)
+    if cambios:
+        store.update("CLIENTES", r["id"], cambios)
 
 
 # ---------------------------------------------------------------- registros
@@ -186,14 +194,16 @@ def base_entregas(store, desde: str, hasta: str, cuenta: str = "", proceso: str 
         return {k: x[k] for k in PEDIDO}
 
     for _, s in store.read("SOLICITUDES").iterrows():
-        if s["estado"] == "anulado" or not ok(s["fecha_entrega"], s["cuenta"], s["proceso"]):
-            continue
         r = rutas.loc[s["ruta_id"]] if s["ruta_id"] in rutas.index else None
+        # "hasta una fecha": si ya tiene ruta, la fecha real es la de la ruta
+        fecha = r["fecha"] if (r is not None and s["tipo_fecha"] == "hasta") else s["fecha_entrega"]
+        if s["estado"] == "anulado" or not ok(fecha, s["cuenta"], s["proceso"]):
+            continue
         t = (r["t_transporte"] if r is not None else "") or s["t_transporte_sol"]
         rev = {"entregado": "OK", "no_entregado": f"NO ENTREGADO: {s['nota_entrega']}"}.get(
             s["estado"], ESTADOS.get(s["estado"], s["estado"]).upper())
         filas.append({
-            "fecha_entrega": s["fecha_entrega"], "cuenta": s["cuenta"], "cliente": s["cliente"],
+            "fecha_entrega": fecha, "cuenta": s["cuenta"], "cliente": s["cliente"],
             "hora_cita": s["hora_cita"], "hora_llegada": s["hora_llegada"], "proceso": s["proceso"],
             "origen": s["origen"], "destino": s["destino"], "t_transporte": t,
             "chofer": r["chofer"] if r is not None else "", "direccion": s["direccion"],

@@ -29,7 +29,10 @@ def _book():
         token_uri="https://oauth2.googleapis.com/token",
     )
     gc = gspread.authorize(creds)
-    sheet_id = st.secrets.get("sheet_id") or cfg.get("sheet_id")
+    sheet_id = (st.secrets.get("sheet_id") or st.secrets.get("spreadsheet_id")
+                or cfg.get("sheet_id") or cfg.get("spreadsheet_id"))
+    if not sheet_id:
+        raise RuntimeError("Falta sheet_id en los Secrets.")
     return gc.open_by_key(sheet_id)
 
 
