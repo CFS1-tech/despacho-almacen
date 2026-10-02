@@ -52,7 +52,7 @@ def aprender_cliente(store, mov: dict, contar: bool = True):
     if ex.empty:
         store.append("CLIENTES", [{
             "id": nuevo_id(), "cuenta_id": cuenta_id, "cuenta": mov.get("cuenta", ""), "cliente": cliente,
-            "direccion": mov.get("direccion", ""), "destino": lugar, "contacto": mov.get("contacto", ""),
+            "direccion": mov.get("direccion", ""), "destino": lugar, "contacto": "",
             "referencia": mov.get("referencia", ""), "usos": "1", "activo": "TRUE",
         }])
         return
@@ -61,7 +61,7 @@ def aprender_cliente(store, mov: dict, contar: bool = True):
     for k, v in (("direccion", mov.get("direccion")), ("destino", lugar)):
         if txt(v) and txt(v) != txt(r[k]):
             cambios[k] = txt(v)
-    for k, v in (("contacto", mov.get("contacto")), ("referencia", mov.get("referencia"))):
+    for k, v in (("referencia", mov.get("referencia")),):
         if not txt(r[k]) and txt(v):
             cambios[k] = txt(v)
     if cambios:
