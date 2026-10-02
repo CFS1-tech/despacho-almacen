@@ -5,6 +5,8 @@ activa se guarda en st.session_state["seccion"]; cada sección es una función.
 """
 from datetime import date, timedelta
 
+import re
+
 import pandas as pd
 import streamlit as st
 
@@ -444,10 +446,8 @@ def tabla_registros(df: pd.DataFrame, columnas: dict, alto=None):
 # ================================================================ secciones
 # ================================================================ solicitud de transporte (varios puntos)
 PUNTO_COLS = {"cliente": "Cliente / punto de entrega", "direccion": "Dirección", "destino": "Destino (distrito)",
-              "referencia": "Referencia", "contacto": "Contacto", "cant_caja": "Cajas", "pedido_gr": "Pedido - GR",
-              "n_orden": "N.° orden", "palets": "Palets", "unidades": "Unidades", "cant_inner": "Inner",
-              "accesorio": "Accesorio", "maquina": "Máquina", "x_und_acc": "X und. acc."}
-NUM_PUNTO = ["cant_caja", "palets", "unidades", "cant_inner", "accesorio", "maquina", "x_und_acc"]
+              "contacto": "Contacto"}
+SIN_CLIENTE = "(Sin cliente)"
 TIPO_FECHA = {"exacta": "En fecha exacta", "hasta": "Hasta una fecha límite"}
 EDITABLES = ("pendiente", "ruteado")
 
@@ -469,85 +469,94 @@ def form_solicitud():
     ss.setdefault("sol_proc", "OUT")
     ss.setdefault("sol_fecha", hoy())
     ss.setdefault("sol_tipo_fecha", "exacta")
+    n = ss.get("sol_n", 0)
+
+    # 1) fecha y hora de cita
+    st.markdown("**Fecha y hora**")
+    st.radio("Fecha de entrega", list(TIPO_FECHA), format_func=TIPO_FECHA.get, key="sol_tipo_fecha", horizontal=True,
+             label_visibility="collapsed")
+    a, b = st.columns(2)
+    a.date_input("Fecha límite" if ss["sol_tipo_fecha"] == "hasta" else "Fecha de entrega", key="sol_fecha",
+                 format="DD/MM/YYYY")
+    b.time_input("Hora de cita (opcional)", value=None, key=f"sol_hora_{n}", step=timedelta(minutes=15))
+    st.divider()
+
+    # 2) proceso, cuenta y clientes
     st.radio("Proceso", ["OUT", "IN"], format_func={"OUT": "OUT · Despacho", "IN": "IN · Recepción"}.get,
              horizontal=True, key="sol_proc")
     cu = cuentas_act()
     cuenta_id = st.selectbox("Cuenta", cu["id"].tolist(), format_func=dict(zip(cu["id"], cu["nombre"])).get,
                              index=None, placeholder="Selecciona la cuenta…", key="sol_cuenta")
-    cl = clientes_de(cuenta_id) if cuenta_id else pd.DataFrame(columns=["id", "cliente", "destino"])
+    cl = clientes_de(cuenta_id) if cuenta_id else pd.DataFrame(columns=["id", "cliente", "destino", "direccion"])
     etiqueta = {r["id"]: r["cliente"] + (f"  ·  {r['destino']}" if r["destino"] else "") for _, r in cl.iterrows()}
-    sel = st.multiselect("Clientes / puntos de entrega (opcional)", cl["id"].tolist(), format_func=etiqueta.get,
-                         key=f"sol_sel_{cuenta_id}", disabled=not cuenta_id,
-                         placeholder="Escribe para buscar · puedes elegir varios" if cuenta_id else "Primero elige la cuenta",
-                         help="Cada cliente es un punto de entrega distinto: se registra una solicitud por punto.")
+    sel = st.multiselect("Clientes / puntos de entrega (opcional)", cl["id"].tolist(),
+                         format_func=lambda v: etiqueta.get(v, f"➕ {v} (nuevo)"),
+                         accept_new_options=True, key=f"sol_sel_{cuenta_id}_{n}", disabled=not cuenta_id,
+                         placeholder="Busca o escribe un cliente nuevo · puedes elegir varios" if cuenta_id
+                         else "Primero elige la cuenta",
+                         help="Cada cliente es un punto de entrega distinto: se registra una solicitud por punto. "
+                              "Si no está en la lista, escribe el nombre y presiona Enter.")
+    cli_idx = cl.set_index("id") if not cl.empty else pd.DataFrame(columns=["cliente", "direccion", "destino"])
     filas = []
-    cli_idx = cl.set_index("id") if not cl.empty else None
-    for cid in sel:
-        r = cli_idx.loc[cid]
-        filas.append({"id": cid, "cliente": r["cliente"], "direccion": r["direccion"], "destino": r["destino"],
-                      "referencia": r["referencia"], "contacto": r["contacto"]})
+    for v in sel:
+        if v in cli_idx.index:
+            r = cli_idx.loc[v]
+            filas.append({"id": v, "cliente": r["cliente"], "direccion": r["direccion"], "destino": r["destino"],
+                          "contacto": ""})
+        else:
+            nombre = re.sub(r"^(➕\s*)+|(\s*\(nuevo\))+$", "", txt(v), flags=re.I).strip().upper()
+            filas.append({"id": "", "cliente": nombre, "direccion": "", "destino": "", "contacto": ""})
     if not filas:
-        filas = [{"id": ""}]
-    df = pd.DataFrame(filas, columns=["id", *PUNTO_COLS]).fillna("")
-    for k in NUM_PUNTO:
-        df[k] = pd.to_numeric(df[k], errors="coerce")
-    cfg = {"id": None}
-    for k, lab in PUNTO_COLS.items():
-        cfg[k] = (st.column_config.NumberColumn(lab, min_value=0, width="small") if k in NUM_PUNTO
-                  else st.column_config.TextColumn(lab, width="medium" if k in ("cliente", "direccion") else "small"))
-    st.markdown("**Puntos de entrega**")
-    ed = st.data_editor(df, num_rows="dynamic", hide_index=True, width="stretch", column_config=cfg,
-                        key=f"sol_ed_{ss.get('sol_n', 0)}_{cuenta_id}_{'|'.join(sel)}")
-    st.caption("Revisa o completa la dirección de cada punto: queda guardada para la próxima vez. "
-               "Para un punto nuevo, escribe en la última fila de la tabla.")
-    a, b = st.columns(2)
-    a.radio("Fecha de entrega", list(TIPO_FECHA), format_func=TIPO_FECHA.get, key="sol_tipo_fecha")
-    b.date_input("Fecha límite" if ss["sol_tipo_fecha"] == "hasta" else "Fecha", key="sol_fecha", format="DD/MM/YYYY")
-    a, b = st.columns(2)
-    a.time_input("Hora de cita (opcional)", value=None, key="sol_hora", step=timedelta(minutes=15))
+        filas = [{"id": "", "cliente": SIN_CLIENTE, "direccion": "", "destino": "", "contacto": ""}]
+    df = pd.DataFrame(filas, columns=["id", *PUNTO_COLS])
+    st.markdown("**Datos de entrega**")
+    ed = st.data_editor(
+        df, num_rows="fixed", hide_index=True, width="stretch",
+        key=f"sol_ed_{n}_{cuenta_id}_{'|'.join(sel)}",
+        column_config={"id": None,
+                       "cliente": st.column_config.TextColumn("Cliente", disabled=True, width="small"),
+                       "direccion": st.column_config.TextColumn("Dirección", width="medium"),
+                       "destino": st.column_config.TextColumn("Destino", width="small"),
+                       "contacto": st.column_config.TextColumn("Contacto", width="small")})
+    st.caption("La dirección y el destino quedan guardados para la próxima vez. El contacto no se guarda.")
+    st.divider()
+
+    # 3) transporte y observaciones
     ti = tipos_act()
     ti = ti[ti["categoria"] != "CLIENTE"]
-    b.selectbox("T. transporte (opcional)", ti["nombre"].tolist(), index=None, placeholder="Sin preferencia",
-                key="sol_tipo")
-    st.text_area("Observaciones", key="sol_obs", height=80, placeholder="Qué se envía, indicaciones de acceso…")
+    st.selectbox("T. transporte (opcional)", ti["nombre"].tolist(), index=None, placeholder="Sin preferencia",
+                 key=f"sol_tipo_{n}")
+    st.text_area("Observaciones", key=f"sol_obs_{n}", height=80, placeholder="Qué se envía, indicaciones de acceso…")
     if st.button("Registrar solicitud", type="primary", width="stretch"):
-        _guardar_solicitud(cuenta_id, ed, cli_idx)
+        _guardar_solicitud(cuenta_id, ed, cli_idx, n)
 
 
-def _guardar_solicitud(cuenta_id, ed, cli_idx):
+def _guardar_solicitud(cuenta_id, ed, cli_idx, n):
     if not cuenta_id:
         st.error("Elige la cuenta.")
         return
     ed = ed.copy()
     for k in PUNTO_COLS:
-        if k not in NUM_PUNTO:
-            ed[k] = ed[k].map(txt)
-    puntos = ed[(ed["cliente"] != "") | (ed["direccion"] != "")]
-    if puntos.empty:
-        st.error("Agrega al menos un punto de entrega con su dirección.")
-        return
-    sin_dir = puntos[puntos["direccion"] == ""]
+        ed[k] = ed[k].map(txt)
+    sin_dir = ed[ed["direccion"] == ""]
     if not sin_dir.empty:
-        st.error("Falta la dirección de: " + ", ".join(sin_dir["cliente"].replace("", "(sin nombre)")))
+        st.error("Falta la dirección de: " + ", ".join(sin_dir["cliente"]))
         return
     cuenta = store.read("CUENTAS").set_index("id").loc[cuenta_id, "nombre"]
     proceso = ss["sol_proc"]
-    grupo = L.nuevo_grupo() if len(puntos) > 1 else ""
+    grupo = L.nuevo_grupo() if len(ed) > 1 else ""
     codigos = []
-    for _, p in puntos.iterrows():
+    for _, p in ed.iterrows():
         lugar = p["destino"].upper()
-        cid = p["id"] if txt(p["id"]) and cli_idx is not None and txt(p["id"]) in cli_idx.index \
-            and norm(cli_idx.loc[p["id"], "cliente"]) == norm(p["cliente"]) else ""
-        datos = {"proceso": proceso, "cuenta_id": cuenta_id, "cuenta": cuenta, "cliente": p["cliente"], "cliente_id": cid,
-                 "direccion": p["direccion"], "referencia": p["referencia"], "contacto": p["contacto"],
+        cliente = "" if p["cliente"] == SIN_CLIENTE else p["cliente"]
+        datos = {"proceso": proceso, "cuenta_id": cuenta_id, "cuenta": cuenta, "cliente": cliente,
+                 "cliente_id": p["id"] if p["id"] in cli_idx.index else "",
+                 "direccion": p["direccion"], "referencia": "", "contacto": p["contacto"],
                  "origen": ALMACEN if proceso == "OUT" else (lugar or "CLIENTE"),
                  "destino": lugar if proceso == "OUT" else ALMACEN,
                  "fecha_entrega": ss["sol_fecha"].isoformat(), "tipo_fecha": ss["sol_tipo_fecha"],
-                 "hora_cita": hora_str(ss.get("sol_hora")), "t_transporte_sol": ss.get("sol_tipo") or "",
-                 "observacion": txt(ss.get("sol_obs")), "grupo": grupo,
-                 "pedido_gr": p["pedido_gr"], "n_orden": p["n_orden"]}
-        for k in NUM_PUNTO:
-            datos[k] = "" if num(p[k]) is None else str(num(p[k]))
+                 "hora_cita": hora_str(ss.get(f"sol_hora_{n}")), "t_transporte_sol": ss.get(f"sol_tipo_{n}") or "",
+                 "observacion": txt(ss.get(f"sol_obs_{n}")), "grupo": grupo}
         codigos.append(L.crear_movimiento(store, "SOLICITUDES", datos, USUARIO)["codigo"])
     ss["_sol_reset"] = True
     flash(f"Registrado: **{', '.join(codigos)}**" + (f" (pedido {grupo})" if grupo else ""))
@@ -626,10 +635,10 @@ def lista_mis_solicitudes():
     cuenta = mias["estado"].value_counts()
     st.markdown("#### Mis solicitudes")
     st.markdown("<div class='kpi-mini'>" + "".join(
-        f"<span>{ESTADOS[e]}&nbsp; <b>{cuenta.get(e, 0)}</b></span>" for e in ("pendiente", "ruteado", "en_ruta", "entregado", "no_entregado"))
+        f"<span>{ESTADOS[e]}&nbsp; <b>{cuenta.get(e, 0)}</b></span>" for e in ("pendiente", "ruteado"))
         + "</div>", unsafe_allow_html=True)
     f1, f2 = st.columns([1, 2])
-    est = f1.selectbox("Estado", ["", "pendiente", "ruteado", "en_ruta", "entregado", "no_entregado"],
+    est = f1.selectbox("Estado", ["", "pendiente", "ruteado"],
                        format_func=lambda e: ESTADOS.get(e, "Todos"), key="ms_est")
     q = f2.text_input("Buscar", placeholder="Cuenta, cliente, código, GR, destino", key="ms_q")
     if est:
@@ -670,7 +679,7 @@ def lista_mis_solicitudes():
 def sec_solicitudes():
     st.subheader("Solicitud de unidad de transporte")
     st.caption("Queda **pendiente** hasta que el área de ruteo la asigne a una ruta.")
-    izq, der = st.columns([5, 6], gap="large")
+    izq, der = st.columns([6, 5], gap="large")
     with izq, st.container(border=True):
         form_solicitud()
     with der:
